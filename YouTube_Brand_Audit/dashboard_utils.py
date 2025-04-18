@@ -11,6 +11,12 @@ openai.api_key = OPENAI_API_KEY
 
 sponsor_cache = {}
 
+# fallback keywords list for basic brand detection
+KNOWN_BRANDS = [
+    "nordvpn", "hubspot", "hostinger", "squarespace", "skillshare", "audible",
+    "betterhelp", "masterclass", "expressvpn", "shopify", "clickup", "monday.com"
+]
+
 def extract_channel_id_from_url(url):
     if "/channel/" in url:
         return url.split("/channel/")[1].split("/")[0]
@@ -54,30 +60,50 @@ def detect_sponsor(description):
         return sponsor_cache[context]
 
     try:
-        prompt = f"""You are an expert at detecting sponsorships in YouTube video descriptions.
-Your job is to return the name of a third-party brand or company (external sponsor) being promoted.
-Ignore any self-promotion (like creator's website, course, or mentorship links).
+        prompt = f"""
+You are an expert in detecting sponsorship mentions in YouTube descriptions.
+ONLY return the third-party sponsor/brand name if clearly promoted.
 
-Only return the brand name. If none, return 'None'.
+✅ GOOD Examples:
+"Get 30% off NordVPN here" → NordVPN
+"Thanks to HubSpot for sponsoring" → HubSpot
+"Try Hostinger today" → Hostinger
+
+🚫 BAD (ignore self-promotion):
+- Instagram links
+- YouTube, Courses, Newsletters
+- Personal brands, websites, etc.
+
+Return ONLY the sponsor brand name (one name). If none, return "None".
 
 Description:
-{context}"""
+{context.strip()}
+"""
 
         response = openai.ChatCompletion.create(
             model="gpt-4",
             messages=[
-                {"role": "system", "content": "Extract only third-party sponsor names from the given YouTube description."},
+                {"role": "system", "content": "Return ONLY one sponsor name (if third-party brand). Return 'None' if there's no sponsor."},
                 {"role": "user", "content": prompt.strip()}
             ],
             max_tokens=20,
             temperature=0
         )
         answer = response.choices[0].message.content.strip()
-        sponsor_cache[context] = answer if answer.lower() != 'none' else ''
-        return sponsor_cache[context]
+        sponsor = answer if answer.lower() != 'none' else ''
     except Exception:
-        sponsor_cache[context] = ''
-        return ''
+        sponsor = ''
+
+    # Fallback: scan top lines for known brands if GPT failed
+    if sponsor == '':
+        lowered = context.lower()
+        for brand in KNOWN_BRANDS:
+            if brand in lowered:
+                sponsor = brand.capitalize()
+                break
+
+    sponsor_cache[context] = sponsor
+    return sponsor
 
 def get_recent_videos(channel_id, metadata, max_results=50):
     uploads_response = call_youtube_api("channels", {"id": channel_id, "part": "contentDetails"})
@@ -121,4 +147,3 @@ def highlight_top_sponsored_topics(video_data):
         'title': 'count'
     }).rename(columns={'title': 'video_count'}).sort_values(by='views', ascending=False)
     return grouped.reset_index().to_markdown(index=False)
-
