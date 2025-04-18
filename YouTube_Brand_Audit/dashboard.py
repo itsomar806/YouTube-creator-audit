@@ -126,6 +126,7 @@ def get_recent_videos(channel_id: str, channel_metadata: dict, max_results: int 
         "part": "snippet,statistics",
         "id": ','.join(video_ids)
     })
+
     result = []
     for item in videos_response['items']:
         vid = item['id']
@@ -139,12 +140,12 @@ def get_recent_videos(channel_id: str, channel_metadata: dict, max_results: int 
             'views': int(stats.get('viewCount', 0)),
             'likes': int(stats.get('likeCount', 0)),
             'comments': int(stats.get('commentCount', 0)),
-            'video_url': f"https://www.youtube.com/watch?v={vid}",
-            'sponsor': detect_sponsor(snippet['description'])
+            'video_url': f"https://www.youtube.com/watch?v={vid}"
         }
         result.append(video_info)
-    return result
 
+    return result
+    
 def highlight_top_sponsored_topics(video_data: list):
     df = pd.DataFrame(video_data)
     df = df[df['sponsor'] != '']
