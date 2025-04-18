@@ -16,7 +16,7 @@ url = st.text_input("Paste a YouTube channel URL:")
 if st.button("Run Audit") and url:
     try:
         channel_id = extract_channel_id_from_url(url)
-        metadata = get_channel_metadata(channel_id)
+st.info(f"🔍 Channel ID: {channel_id}")
 
         if metadata is None:
             st.error("❌ Could not fetch channel metadata. Please check the URL or try again.")
