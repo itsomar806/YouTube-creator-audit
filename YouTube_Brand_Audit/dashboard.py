@@ -1,49 +1,102 @@
 import os
 import re
+import csv
 import requests
-import pandas as pd
 import openai
-
-# Set your API keys from environment variables
-YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-openai.api_key = OPENAI_API_KEY
+from datetime import datetime
+import pandas as pd
+import streamlit as st
+from collections import defaultdict
 
 sponsor_cache = {}
 
-# fallback keywords list for basic brand detection
-KNOWN_BRANDS = [
-    "nordvpn", "hubspot", "hostinger", "squarespace", "skillshare", "audible",
-    "betterhelp", "masterclass", "expressvpn", "shopify", "clickup", "monday.com"
-]
+YOUTUBE_API_KEY = "AIzaSyCZvrlrMXE1jCPDLZ6NVMDe1uf_OXhYBkM"
+OPENAI_API_KEY = "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"
+openai.api_key = OPENAI_API_KEY
 
-KNOWN_SPONSOR_DOMAINS = [
-    "clickhubspot", "hostinger.com", "nordvpn", "expressvpn", "audible.com",
-    "betterhelp.com", "squarespace.com", "skillshare.com", "shopify.com"
-]
+YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3"
 
-def extract_channel_id_from_url(url):
-    if "/channel/" in url:
-        return url.split("/channel/")[1].split("/")[0]
-    elif "/@" in url:
-        handle = url.split("/@")[1].split("/")[0]
-        data = call_youtube_api("search", {"q": f"@{handle}", "type": "channel", "part": "snippet"})
-        return data['items'][0]['snippet']['channelId'] if data['items'] else None
-    else:
-        raise ValueError("Invalid YouTube channel URL.")
-
-def call_youtube_api(endpoint, params):
-    url = f"https://www.googleapis.com/youtube/v3/{endpoint}"
+def call_youtube_api(endpoint: str, params: dict):
     params['key'] = YOUTUBE_API_KEY
-    response = requests.get(url, params=params)
-    if response.status_code != 200:
-        raise Exception(f"YouTube API error: {response.text}")
+    response = requests.get(f"{YOUTUBE_API_BASE}/{endpoint}", params=params)
+    if response.status_code in [400, 403]:
+        raise requests.HTTPError(f"{response.status_code} Error: {response.text}")
+    response.raise_for_status()
     return response.json()
 
-def get_channel_metadata(channel_id):
-    data = call_youtube_api("channels", {"id": channel_id, "part": "snippet,statistics"})
+def extract_channel_id_from_url(url: str) -> str:
+    if "@" in url:
+        handle = url.strip().split("@")[-1].split("/")[0]
+        data = call_youtube_api("search", {
+            "q": handle,
+            "type": "channel",
+            "part": "snippet",
+            "maxResults": 1
+        })
+        if not data['items']:
+            raise ValueError("❌ Could not extract channel ID from YouTube page")
+        return data['items'][0]['snippet']['channelId']
+    elif "channel/" in url:
+        return url.split("channel/")[-1].split("/")[0]
+    raise ValueError("❌ Invalid YouTube channel URL format")
+
+def detect_sponsor(description: str) -> str:
+    if description in sponsor_cache:
+        return sponsor_cache[description]
+
+    try:
+        # Try common sponsor patterns first
+        sponsor_patterns = [
+            r"https?://(?:www\.)?([\w\-]+)\.com.*?utm_source=([\w\-]+)",
+            r"sponsored by ([\w\s]+)",
+            r"partnered with ([\w\s]+)",
+            r"https?://(?:www\.)?([\w\-]+)\.com/[\w\-\?=]+"
+        ]
+        for pattern in sponsor_patterns:
+            match = re.search(pattern, description, re.IGNORECASE)
+            if match:
+                sponsor = match.group(1).strip()
+                sponsor_cache[description] = sponsor
+                return sponsor
+
+        # Fallback to OpenAI
+        lines = description.strip().splitlines()
+        context = "\n".join(lines[:10])
+        prompt = (
+            "You are a sponsorship detection expert. Your job is to extract the name of an external "
+            "third-party sponsor (brand/company) from the YouTube description text provided.\n"
+            "Ignore all URLs or mentions of the creator's own programs, mentorships, or newsletters.\n"
+            "Do not include vague phrases like 'None', 'No sponsor', or promotional taglines.\n"
+            "Respond ONLY with the sponsor name (e.g., 'HubSpot', 'NordVPN', 'Squarespace').\n"
+            "If there is no clear external sponsor, return: None\n\n"
+            f"Description:\n{context}"
+        )
+
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You extract third-party sponsors from YouTube video descriptions."},
+                {"role": "user", "content": prompt.strip()}
+            ],
+            max_tokens=30,
+            temperature=0
+        )
+        answer = response.choices[0].message.content.strip()
+        sponsor_cache[description] = '' if answer.lower() in ['none', 'no sponsor', 'n/a', ''] else answer
+        return sponsor_cache[description]
+
+    except Exception:
+        sponsor_cache[description] = ''
+        return ''
+
+
+def get_channel_metadata(channel_id: str):
+    data = call_youtube_api("channels", {
+        "id": channel_id,
+        "part": "snippet,statistics,brandingSettings"
+    })
     if not data.get('items'):
-        raise ValueError("Invalid or unknown channel ID.")
+        raise ValueError("Invalid or unknown channel ID. Please check that the channel exists.")
     item = data['items'][0]
     snippet = item['snippet']
     stats = item['statistics']
@@ -57,103 +110,62 @@ def get_channel_metadata(channel_id):
         'viewCount': stats.get('viewCount')
     }
 
-def detect_sponsor(description):
-    lines = [line.strip() for line in description.strip().splitlines() if line.strip()]
-    first_line = lines[0] if lines else ''
-
-    if first_line in sponsor_cache:
-        return sponsor_cache[first_line]
-
-    sponsor = ''
-    try:
-        cleaned = re.sub(r'[\W_]+', ' ', first_line)
-        prompt = f"""
-You are an expert in detecting sponsorship mentions in YouTube descriptions.
-ONLY return the third-party sponsor/brand name if clearly promoted.
-
-✅ GOOD Examples:
-"Get 30% off NordVPN here" → NordVPN
-"Thanks to HubSpot for sponsoring" → HubSpot
-"Try Hostinger today" → Hostinger
-
-🚫 BAD (ignore self-promotion):
-- Instagram links
-- YouTube, Courses, Newsletters
-- Personal brands, websites, etc.
-
-Return ONLY the sponsor brand name (one name). If none, return "None".
-
-Description:
-{cleaned.strip()}
-"""
-        response = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": "Return ONLY one sponsor name (if third-party brand). Return 'None' if there's no sponsor."},
-                {"role": "user", "content": prompt.strip()}
-            ],
-            max_tokens=20,
-            temperature=0
-        )
-        answer = response.choices[0].message.content.strip()
-        sponsor = answer if answer.lower() != 'none' else ''
-    except Exception:
-        sponsor = ''
-
-    if sponsor == '':
-        lowered = first_line.lower()
-        for domain in KNOWN_SPONSOR_DOMAINS:
-            if domain in lowered:
-                sponsor = domain.split(".")[0].capitalize()
-                break
-        if sponsor == '':
-            for brand in KNOWN_BRANDS:
-                if brand in lowered:
-                    sponsor = brand.capitalize()
-                    break
-
-    sponsor_cache[first_line] = sponsor
-    return sponsor
-
-def get_recent_videos(channel_id, metadata, max_results=50):
-    uploads_response = call_youtube_api("channels", {"id": channel_id, "part": "contentDetails"})
-    playlist_id = uploads_response['items'][0]['contentDetails']['relatedPlaylists']['uploads']
-    playlist_items = call_youtube_api("playlistItems", {"part": "snippet", "playlistId": playlist_id, "maxResults": max_results})
+def get_recent_videos(channel_id: str, channel_metadata: dict, max_results: int = 50):
+    uploads_response = call_youtube_api("channels", {
+        "id": channel_id,
+        "part": "contentDetails"
+    })
+    uploads_playlist_id = uploads_response['items'][0]['contentDetails']['relatedPlaylists']['uploads']
+    playlist_items = call_youtube_api("playlistItems", {
+        "part": "snippet",
+        "playlistId": uploads_playlist_id,
+        "maxResults": max_results
+    })
     video_ids = [item['snippet']['resourceId']['videoId'] for item in playlist_items['items']]
-    videos = call_youtube_api("videos", {"part": "snippet,statistics", "id": ','.join(video_ids)})
-
+    videos_response = call_youtube_api("videos", {
+        "part": "snippet,statistics",
+        "id": ','.join(video_ids)
+    })
     result = []
-    for item in videos['items']:
-        desc = item['snippet']['description']
-        sponsor = detect_sponsor(desc)
-        result.append({
-            'videoId': item['id'],
-            'title': item['snippet']['title'],
-            'description': desc,
-            'publishedAt': item['snippet']['publishedAt'],
-            'views': int(item['statistics'].get('viewCount', 0)),
-            'likes': int(item['statistics'].get('likeCount', 0)),
-            'comments': int(item['statistics'].get('commentCount', 0)),
-            'video_url': f"https://www.youtube.com/watch?v={item['id']}",
-            'sponsor': sponsor if sponsor.lower() not in ["youtube", "instagram"] else ''
-        })
+    for item in videos_response['items']:
+        vid = item['id']
+        snippet = item['snippet']
+        stats = item['statistics']
+        video_info = {
+            'videoId': vid,
+            'title': snippet['title'],
+            'description': snippet['description'],
+            'publishedAt': snippet['publishedAt'],
+            'views': int(stats.get('viewCount', 0)),
+            'likes': int(stats.get('likeCount', 0)),
+            'comments': int(stats.get('commentCount', 0)),
+            'video_url': f"https://www.youtube.com/watch?v={vid}",
+            'sponsor': detect_sponsor(snippet['description'])
+        }
+        result.append(video_info)
     return result
 
-def export_to_excel(video_data, metadata):
+def highlight_top_sponsored_topics(video_data: list):
+    df = pd.DataFrame(video_data)
+    df = df[df['sponsor'] != '']
+    if df.empty:
+        return pd.DataFrame()
+    df['topic'] = df['title'].apply(lambda x: x.split('|')[0].strip() if '|' in x else x.split(':')[0].strip())
+    summary = df.groupby('topic')[['views', 'likes', 'comments']].mean().sort_values(by='views', ascending=False)
+    return summary
+
+def export_to_excel(video_data: list, metadata: dict):
     df = pd.DataFrame(video_data)
     filename = f"{metadata['title'].replace(' ', '_')}_channel_analysis.xlsx"
     df.to_excel(filename, index=False)
     return filename
 
-def highlight_top_sponsored_topics(video_data):
-    df = pd.DataFrame(video_data)
-    df = df[df['sponsor'] != '']
-    if df.empty:
-        return "No sponsored videos to analyze."
-    grouped = df.groupby('sponsor').agg({
-        'views': 'mean',
-        'likes': 'mean',
-        'comments': 'mean',
-        'title': 'count'
-    }).rename(columns={'title': 'video_count'}).sort_values(by='views', ascending=False)
-    return grouped.reset_index().to_markdown(index=False)
+__all__ = [
+    "call_youtube_api",
+    "extract_channel_id_from_url",
+    "get_channel_metadata",
+    "get_recent_videos",
+    "detect_sponsor",
+    "export_to_excel",
+    "highlight_top_sponsored_topics"  # ✅ make sure this is included
+]
