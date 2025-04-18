@@ -17,6 +17,11 @@ KNOWN_BRANDS = [
     "betterhelp", "masterclass", "expressvpn", "shopify", "clickup", "monday.com"
 ]
 
+KNOWN_SPONSOR_DOMAINS = [
+    "clickhubspot", "hostinger.com", "nordvpn", "expressvpn", "audible.com",
+    "betterhelp.com", "squarespace.com", "skillshare.com", "shopify.com"
+]
+
 def extract_channel_id_from_url(url):
     if "/channel/" in url:
         return url.split("/channel/")[1].split("/")[0]
@@ -59,6 +64,7 @@ def detect_sponsor(description):
     if context in sponsor_cache:
         return sponsor_cache[context]
 
+    sponsor = ''
     try:
         prompt = f"""
 You are an expert in detecting sponsorship mentions in YouTube descriptions.
@@ -79,7 +85,6 @@ Return ONLY the sponsor brand name (one name). If none, return "None".
 Description:
 {context.strip()}
 """
-
         response = openai.ChatCompletion.create(
             model="gpt-4",
             messages=[
@@ -94,13 +99,17 @@ Description:
     except Exception:
         sponsor = ''
 
-    # Fallback: scan top lines for known brands if GPT failed
     if sponsor == '':
         lowered = context.lower()
-        for brand in KNOWN_BRANDS:
-            if brand in lowered:
-                sponsor = brand.capitalize()
+        for domain in KNOWN_SPONSOR_DOMAINS:
+            if re.search(re.escape(domain), lowered):
+                sponsor = domain.split(".")[0].capitalize()
                 break
+        if sponsor == '':
+            for brand in KNOWN_BRANDS:
+                if brand in lowered:
+                    sponsor = brand.capitalize()
+                    break
 
     sponsor_cache[context] = sponsor
     return sponsor
