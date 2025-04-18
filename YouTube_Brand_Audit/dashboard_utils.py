@@ -66,30 +66,22 @@ def detect_sponsor(description):
 
     sponsor = ''
     try:
-        cleaned = re.sub(r'[\W_]+', ' ', first_line)
         prompt = f"""
-You are an expert in detecting sponsorship mentions in YouTube descriptions.
-ONLY return the third-party sponsor/brand name if clearly promoted.
+You are an expert in detecting sponsorships in YouTube descriptions.
+Only consider the **first line**. Return the **third-party sponsor name only** (not platforms like Instagram, YouTube, courses, newsletters, or personal sites).
 
-✅ GOOD Examples:
-"Get 30% off NordVPN here" → NordVPN
-"Thanks to HubSpot for sponsoring" → HubSpot
-"Try Hostinger today" → Hostinger
-
-🚫 BAD (ignore self-promotion):
-- Instagram links
-- YouTube, Courses, Newsletters
-- Personal brands, websites, etc.
-
-Return ONLY the sponsor brand name (one name). If none, return "None".
+Examples:
+- "Check out Hostinger here" → Hostinger
+- "Get 30% off NordVPN" → NordVPN
+- "Watch this on YouTube" → None
 
 Description:
-{cleaned.strip()}
+"{first_line}"
 """
         response = openai.ChatCompletion.create(
             model="gpt-4",
             messages=[
-                {"role": "system", "content": "Return ONLY one sponsor name (if third-party brand). Return 'None' if there's no sponsor."},
+                {"role": "system", "content": "Return only one sponsor name (third-party). If none, return 'None'."},
                 {"role": "user", "content": prompt.strip()}
             ],
             max_tokens=20,
@@ -100,18 +92,24 @@ Description:
     except Exception:
         sponsor = ''
 
+    # Fallback 1: known domain
     if sponsor == '':
         lowered = first_line.lower()
         for domain in KNOWN_SPONSOR_DOMAINS:
             if domain in lowered:
                 sponsor = domain.split(".")[0].capitalize()
                 break
-        if sponsor == '':
-            for brand in KNOWN_BRANDS:
-                if brand in lowered:
-                    sponsor = brand.capitalize()
-                    break
 
+    # Fallback 2: brand keyword
+    if sponsor == '':
+        for brand in KNOWN_BRANDS:
+            if re.search(rf"\b{re.escape(brand)}\b", first_line.lower()):
+                sponsor = brand.capitalize()
+                break
+
+    # Final block
+    if sponsor.lower() in ["youtube", "instagram", "newsletter", "course"]:
+        sponsor = ''
     sponsor_cache[first_line] = sponsor
     return sponsor
 
