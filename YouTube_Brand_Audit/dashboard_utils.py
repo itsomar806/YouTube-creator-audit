@@ -3,6 +3,10 @@ import re
 import requests
 import pandas as pd
 import openai
+from dotenv import load_dotenv
+
+load_dotenv()  # Load .env values into environment
+
 
 # Set your API keys from environment variables
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
