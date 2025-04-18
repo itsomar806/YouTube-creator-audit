@@ -15,9 +15,11 @@ url = st.text_input("Paste a YouTube channel URL:")
 
 if st.button("Run Audit") and url:
     try:
-        channel_id = extract_channel_id_from_url(url)
         metadata = get_channel_metadata(channel_id)
-        st.success(f"✅ Found: {metadata['title']}")
+if metadata is None:
+    st.error("❌ Could not fetch channel metadata. Please check the URL or try again.")
+    st.stop()
+st.success(f"✅ Found: {metadata['title']}")
 
         videos = get_recent_videos(channel_id, metadata)
         df = pd.DataFrame(videos)
