@@ -5,7 +5,8 @@ from dashboard import (
     get_channel_metadata,
     get_recent_videos,
     export_to_excel,
-    highlight_top_sponsored_topics
+    highlight_top_sponsored_topics,
+    detect_sponsor
 )
 
 st.set_page_config(page_title="YouTube Brand Audit Tool", layout="wide")
@@ -32,40 +33,16 @@ if st.button("Run Audit") and url:
             st.warning("No videos found on this channel.")
             st.stop()
 
-        # Export
-        xlsx_path = export_to_excel(videos, metadata)
-        st.download_button(
-            label="📥 Download Excel Report",
-            data=open(xlsx_path, "rb"),
-            file_name=xlsx_path,
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+        # Show raw video descriptions first
+        st.subheader("📄 Video Descriptions")
+        for video in videos:
+            st.markdown(f"**{video['title']}**\n\n{video['description']}")
 
-        # Sponsors Table
-        st.subheader("📈 Top Performing Sponsors")
-        sponsor_df = df[df["sponsor"] != ""]
-        if not sponsor_df.empty:
-            st.dataframe(
-                sponsor_df.groupby("sponsor")[["views", "likes", "comments"]]
-                .mean().sort_values(by="views", ascending=False)
-                .style.format("{:,.0f}"),
-                use_container_width=True
-            )
-        else:
-            st.info("No sponsors detected.")
-
-        # Sponsored Topic Trends
-        topic_df = highlight_top_sponsored_topics(videos)
-        if not topic_df.empty:
-            st.subheader("🔥 Top Performing Sponsored Topics")
-            st.dataframe(
-                topic_df.style.format("{:,.0f}"),
-                use_container_width=True
-            )
-        else:
-            st.info("No sponsored topics found.")
+        # Detect sponsors using OpenAI
+        st.subheader("🤖 Detected Sponsors")
+        for video in videos:
+            sponsor = detect_sponsor(video['description'])
+            st.markdown(f"🧠 **Detected Sponsor:** `{sponsor}`\n\n📰 **Video:** {video['title']}")
 
     except Exception as e:
         st.error(f"❌ {e}")
-
-
