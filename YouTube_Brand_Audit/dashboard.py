@@ -6,7 +6,7 @@ import openai
 
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-openai.api_key = OPENAI_API_KEY
+openai.api_key = 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
 
 sponsor_cache = {}
 
