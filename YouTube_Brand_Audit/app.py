@@ -8,38 +8,41 @@ from dashboard_utils import (
     highlight_top_sponsored_topics
 )
 
-st.set_page_config(page_title="YouTube Sponsor Audit Dashboard", layout="wide")
-st.title("📊 YouTube Brand Sponsorship Audit")
+st.set_page_config(page_title="YouTube Brand Audit", layout="wide")
+st.title("📊 YouTube Brand Sponsorship Analyzer")
 
-with st.sidebar:
-    st.header("Audit Settings")
-    url_input = st.text_input("Paste a YouTube Channel URL:")
-    limit = st.slider("Max Videos to Analyze", 10, 100, 50)
+with st.form(key="input_form"):
+    channel_url = st.text_input("Enter YouTube Channel URL")
+    max_videos = st.slider("How many recent videos to analyze?", 10, 100, 50, 10)
+    openai_key = st.text_input("Your OpenAI API Key", type="password")
+    submitted = st.form_submit_button("Run Audit")
 
-if url_input:
-    try:
-        channel_id = extract_channel_id_from_url(url_input)
-        with st.spinner("Fetching channel data..."):
+if submitted:
+    with st.spinner("Fetching channel data and analyzing sponsors..."):
+        try:
+            st.info("🔍 Extracting Channel ID...")
+            channel_id = extract_channel_id_from_url(channel_url)
+
+            st.info("📺 Getting channel metadata...")
             metadata = get_channel_metadata(channel_id)
-            video_data = get_recent_videos(channel_id, metadata, max_results=limit)
 
-        st.success(f"Found {len(video_data)} videos for {metadata['title']}")
+            st.info("📹 Pulling recent videos and detecting sponsors...")
+            video_data = get_recent_videos(channel_id, metadata, max_results=max_videos)
 
-        df = pd.DataFrame(video_data)
+            df = pd.DataFrame(video_data)
+            st.success("✅ Audit complete!")
 
-        st.subheader("📈 Channel Overview")
-        st.markdown(f"**Channel Name:** {metadata['title']}")
-        st.markdown(f"**Subscribers:** {metadata['subscriberCount']}")
-        st.markdown(f"**Videos:** {metadata['videoCount']}")
-        st.markdown(f"**Views:** {metadata['viewCount']}")
+            st.subheader(f"Summary for {metadata['title']}")
+            st.markdown(f"**Subscribers:** {metadata['subscriberCount']}  ")
+            st.markdown(f"**Videos analyzed:** {len(video_data)}")
 
-        st.subheader("🎬 Recent Videos")
-        st.dataframe(df[['title', 'views', 'likes', 'comments', 'sponsor', 'video_url']])
+            st.download_button("📥 Download Excel Report", data=export_to_excel(video_data, metadata), file_name="channel_report.xlsx")
 
-        st.download_button("📥 Download Excel Report", data=export_to_excel(video_data, metadata), file_name="audit_report.xlsx")
+            st.subheader("📌 Detected Sponsors")
+            st.dataframe(df[['title', 'video_url', 'sponsor']], use_container_width=True)
 
-        st.subheader("🏆 Top Performing Sponsored Topics")
-        st.markdown(highlight_top_sponsored_topics(video_data))
+            st.subheader("🔥 Top Performing Sponsored Topics")
+            st.markdown(highlight_top_sponsored_topics(video_data))
 
-    except Exception as e:
-        st.error(f"❌ Error: {e}")
+        except Exception as e:
+            st.error(f"❌ Something went wrong: {e}")
