@@ -60,20 +60,36 @@ def get_channel_metadata(channel_id):
 def detect_sponsor(description):
     lines = [line.strip() for line in description.strip().splitlines() if line.strip()]
     first_line = lines[0] if lines else ''
+    lowered = first_line.lower()
 
     if first_line in sponsor_cache:
         return sponsor_cache[first_line]
 
-    sponsor = ''
+    # 1. Skip common platform mentions
+    banned_terms = ["youtube", "instagram", "newsletter", "course", "discord", "twitter", "github"]
+    if any(term in lowered for term in banned_terms):
+        sponsor_cache[first_line] = ''
+        return ''
+
+    # 2. Try fallback from known domains first
+    for domain in KNOWN_SPONSOR_DOMAINS:
+        if domain in lowered:
+            sponsor = domain.split(".")[0].capitalize()
+            sponsor_cache[first_line] = sponsor
+            return sponsor
+
+    # 3. Try fallback from known brands
+    for brand in KNOWN_BRANDS:
+        if brand in lowered:
+            sponsor_cache[first_line] = brand.capitalize()
+            return brand.capitalize()
+
+    # 4. GPT fallback (tight prompt, clean)
     try:
         prompt = f"""
-You are an expert in detecting sponsorships in YouTube descriptions.
-Only consider the **first line**. Return the **third-party sponsor name only** (not platforms like Instagram, YouTube, courses, newsletters, or personal sites).
+Given the following single-line description from a YouTube video, extract the brand or third-party sponsor being promoted.
 
-Examples:
-- "Check out Hostinger here" → Hostinger
-- "Get 30% off NordVPN" → NordVPN
-- "Watch this on YouTube" → None
+Only return the **brand name**. If it’s a personal offer, generic social platform, or nothing sponsored, return "None".
 
 Description:
 "{first_line}"
@@ -81,61 +97,19 @@ Description:
         response = openai.ChatCompletion.create(
             model="gpt-4",
             messages=[
-                {"role": "system", "content": "Return only one sponsor name (third-party). If none, return 'None'."},
+                {"role": "system", "content": "You extract external sponsor brand names."},
                 {"role": "user", "content": prompt.strip()}
             ],
             max_tokens=20,
             temperature=0
         )
-        answer = response.choices[0].message.content.strip()
-        sponsor = answer if answer.lower() != 'none' else ''
+        result = response.choices[0].message.content.strip()
+        sponsor = result if result.lower() != 'none' else ''
     except Exception:
         sponsor = ''
 
-    # Fallback 1: known domain
-    if sponsor == '':
-        lowered = first_line.lower()
-        for domain in KNOWN_SPONSOR_DOMAINS:
-            if domain in lowered:
-                sponsor = domain.split(".")[0].capitalize()
-                break
-
-    # Fallback 2: brand keyword
-    if sponsor == '':
-        for brand in KNOWN_BRANDS:
-            if re.search(rf"\b{re.escape(brand)}\b", first_line.lower()):
-                sponsor = brand.capitalize()
-                break
-
-    # Final block
-    if sponsor.lower() in ["youtube", "instagram", "newsletter", "course"]:
-        sponsor = ''
     sponsor_cache[first_line] = sponsor
     return sponsor
-
-def get_recent_videos(channel_id, metadata, max_results=50):
-    uploads_response = call_youtube_api("channels", {"id": channel_id, "part": "contentDetails"})
-    playlist_id = uploads_response['items'][0]['contentDetails']['relatedPlaylists']['uploads']
-    playlist_items = call_youtube_api("playlistItems", {"part": "snippet", "playlistId": playlist_id, "maxResults": max_results})
-    video_ids = [item['snippet']['resourceId']['videoId'] for item in playlist_items['items']]
-    videos = call_youtube_api("videos", {"part": "snippet,statistics", "id": ','.join(video_ids)})
-
-    result = []
-    for item in videos['items']:
-        desc = item['snippet']['description']
-        sponsor = detect_sponsor(desc)
-        result.append({
-            'videoId': item['id'],
-            'title': item['snippet']['title'],
-            'description': desc,
-            'publishedAt': item['snippet']['publishedAt'],
-            'views': int(item['statistics'].get('viewCount', 0)),
-            'likes': int(item['statistics'].get('likeCount', 0)),
-            'comments': int(item['statistics'].get('commentCount', 0)),
-            'video_url': f"https://www.youtube.com/watch?v={item['id']}",
-            'sponsor': sponsor if sponsor.lower() not in ["youtube", "instagram"] else ''
-        })
-    return result
 
 def export_to_excel(video_data, metadata):
     df = pd.DataFrame(video_data)
