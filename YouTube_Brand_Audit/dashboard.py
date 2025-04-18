@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from dashboard import (
+from dashboard_utils import (
     extract_channel_id_from_url,
     get_channel_metadata,
     get_recent_videos,
