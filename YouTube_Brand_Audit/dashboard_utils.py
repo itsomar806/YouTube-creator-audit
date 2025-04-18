@@ -77,13 +77,20 @@ def detect_sponsor(description):
     if description in sponsor_cache:
         return sponsor_cache[description]
     try:
-        prompt = f"""You are an expert at detecting sponsorships in YouTube video descriptions.
-Given the text below, return the name of a third-party company (external sponsor) that is being promoted.
-Ignore any self-promotion by the creator.
-Respond ONLY with the brand name. If none, return 'None'.
+        # Clean & isolate first 5 non-empty lines
+        first_lines = "\n".join([line.strip() for line in description.splitlines() if line.strip()][:5])
 
-Description:
-{description}"""
+        # Optimized prompt for OpenAI
+        prompt = f"""
+You are a sponsorship detection agent.
+Your task is to extract the name of a company *not owned by the creator* (external sponsor) being promoted in a YouTube description.
+Ignore: the creator’s own products (mentorships, newsletters, courses, etc.), and platforms like YouTube or Instagram.
+Only return the sponsor brand name (e.g., 'HubSpot', 'NordVPN', 'Squarespace', etc). Respond only with the brand name or 'None'.
+
+Text:
+{first_lines}
+"""
+
         response = openai.ChatCompletion.create(
             model="gpt-4",
             messages=[
@@ -94,8 +101,14 @@ Description:
             temperature=0
         )
         answer = response.choices[0].message.content.strip()
-        sponsor_cache[description] = answer if answer.lower() != 'none' else ''
+
+        # Filter common false positives
+        if answer.lower() in ["none", "youtube", "instagram", "tiktok"]:
+            sponsor_cache[description] = ''
+        else:
+            sponsor_cache[description] = answer
         return sponsor_cache[description]
+
     except Exception:
         sponsor_cache[description] = ''
         return ''
