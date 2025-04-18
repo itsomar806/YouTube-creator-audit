@@ -41,8 +41,7 @@ if st.button("Run Audit") and url:
         # Detect sponsors using OpenAI
         st.subheader("🤖 Detected Sponsors")
         for video in videos:
-            desc_head = '
-'.join(video['description'].strip().splitlines()[:5]))
+            desc_head = "\n".join(video['description'].strip().splitlines()[:5])
             sponsor = detect_sponsor(desc_head)
             if sponsor and sponsor.lower() in ["youtube", "instagram"]:
                 sponsor = ""
