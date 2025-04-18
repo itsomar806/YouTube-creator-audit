@@ -1,12 +1,12 @@
 import streamlit as st
 import pandas as pd
+
 from dashboard_utils import (
     extract_channel_id_from_url,
     get_channel_metadata,
     get_recent_videos,
     export_to_excel,
-    highlight_top_sponsored_topics,
-    detect_sponsor
+    highlight_top_sponsored_topics
 )
 
 st.set_page_config(page_title="YouTube Brand Audit Tool", layout="wide")
