@@ -20,6 +20,7 @@ KNOWN_SPONSOR_DOMAINS = [
     "betterhelp.com", "squarespace.com", "skillshare.com", "shopify.com"
 ]
 
+
 def extract_channel_id_from_url(url):
     if "/channel/" in url:
         return url.split("/channel/")[1].split("/")[0]
@@ -30,6 +31,7 @@ def extract_channel_id_from_url(url):
     else:
         raise ValueError("Invalid YouTube channel URL.")
 
+
 def call_youtube_api(endpoint, params):
     url = f"https://www.googleapis.com/youtube/v3/{endpoint}"
     params['key'] = YOUTUBE_API_KEY
@@ -37,6 +39,7 @@ def call_youtube_api(endpoint, params):
     if response.status_code != 200:
         raise Exception(f"YouTube API error: {response.text}")
     return response.json()
+
 
 def get_channel_metadata(channel_id):
     data = call_youtube_api("channels", {"id": channel_id, "part": "snippet,statistics"})
@@ -55,33 +58,35 @@ def get_channel_metadata(channel_id):
         'viewCount': stats.get('viewCount')
     }
 
+
 def detect_sponsor(description):
     lines = [line.strip() for line in description.strip().splitlines() if line.strip()]
-    head = lines[:3] if lines else ['']
-    joined = "\n".join(head)
+    top = "\n".join(lines[:5]) if lines else ''
 
-    if joined in sponsor_cache:
-        return sponsor_cache[joined]
+    if top in sponsor_cache:
+        return sponsor_cache[top]
 
     sponsor = ''
+
+    # --- Layer 1: GPT-4 (function call) ---
     try:
-        system = """You are an expert at finding brand sponsors mentioned in YouTube video descriptions. \
-Only output the third-party brand if a brand is clearly being promoted. If no sponsor is found, reply 'None'.\nDo not include YouTube, Instagram, personal links, etc."""
+        system_msg = """You are an expert sponsorship detector. Extract only third-party brand names being clearly promoted. 
+Avoid personal websites, social handles, courses, etc. Only output ONE sponsor brand. Return 'None' if no sponsor."""
 
         response = openai.ChatCompletion.create(
             model="gpt-4",
             messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": joined.strip()}
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": top.strip()}
             ],
             functions=[
                 {
                     "name": "return_sponsor_name",
-                    "description": "Returns a single sponsor/brand name",
+                    "description": "Returns sponsor name",
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "sponsor": {"type": "string", "description": "Brand being sponsored"}
+                            "sponsor": {"type": "string"}
                         },
                         "required": ["sponsor"]
                     }
@@ -91,27 +96,35 @@ Only output the third-party brand if a brand is clearly being promoted. If no sp
             temperature=0,
             max_tokens=30
         )
-        sponsor = response.choices[0].message.get("function_call", {}).get("arguments", '{}')
-        sponsor = eval(sponsor).get("sponsor", "")
+        parsed = response.choices[0].message.get("function_call", {}).get("arguments", '{}')
+        sponsor = eval(parsed).get("sponsor", "")
         if sponsor.lower() == "none":
             sponsor = ''
     except Exception:
         sponsor = ''
 
+    # --- Layer 2: Regex URL domain match ---
     if sponsor == '':
-        lowered = joined.lower()
-        for domain in KNOWN_SPONSOR_DOMAINS:
-            if domain in lowered:
-                sponsor = domain.split(".")[0].capitalize()
-                break
-        if sponsor == '':
-            for brand in KNOWN_BRANDS:
-                if brand in lowered:
-                    sponsor = brand.capitalize()
+        matches = re.findall(r'https?://([^/\s]+)', top.lower())
+        for url in matches:
+            for known in KNOWN_SPONSOR_DOMAINS:
+                if known in url:
+                    sponsor = known.split(".")[0].capitalize()
                     break
+            if sponsor:
+                break
 
-    sponsor_cache[joined] = sponsor
+    # --- Layer 3: Brand keyword search ---
+    if sponsor == '':
+        lowered = top.lower()
+        for brand in KNOWN_BRANDS:
+            if brand in lowered:
+                sponsor = brand.capitalize()
+                break
+
+    sponsor_cache[top] = sponsor
     return sponsor
+
 
 def get_recent_videos(channel_id, metadata, max_results=50):
     uploads_response = call_youtube_api("channels", {"id": channel_id, "part": "contentDetails"})
@@ -137,11 +150,13 @@ def get_recent_videos(channel_id, metadata, max_results=50):
         })
     return result
 
+
 def export_to_excel(video_data, metadata):
     df = pd.DataFrame(video_data)
     filename = f"{metadata['title'].replace(' ', '_')}_channel_analysis.xlsx"
     df.to_excel(filename, index=False)
     return filename
+
 
 def highlight_top_sponsored_topics(video_data):
     df = pd.DataFrame(video_data)
