@@ -59,13 +59,14 @@ def get_channel_metadata(channel_id):
 
 def detect_sponsor(description):
     lines = [line.strip() for line in description.strip().splitlines() if line.strip()]
-    context = "\n".join(lines[:5])
+    first_line = lines[0] if lines else ''
 
-    if context in sponsor_cache:
-        return sponsor_cache[context]
+    if first_line in sponsor_cache:
+        return sponsor_cache[first_line]
 
     sponsor = ''
     try:
+        cleaned = re.sub(r'[\W_]+', ' ', first_line)
         prompt = f"""
 You are an expert in detecting sponsorship mentions in YouTube descriptions.
 ONLY return the third-party sponsor/brand name if clearly promoted.
@@ -83,7 +84,7 @@ ONLY return the third-party sponsor/brand name if clearly promoted.
 Return ONLY the sponsor brand name (one name). If none, return "None".
 
 Description:
-{context.strip()}
+{cleaned.strip()}
 """
         response = openai.ChatCompletion.create(
             model="gpt-4",
@@ -100,9 +101,9 @@ Description:
         sponsor = ''
 
     if sponsor == '':
-        lowered = context.lower()
+        lowered = first_line.lower()
         for domain in KNOWN_SPONSOR_DOMAINS:
-            if re.search(re.escape(domain), lowered):
+            if domain in lowered:
                 sponsor = domain.split(".")[0].capitalize()
                 break
         if sponsor == '':
@@ -111,7 +112,7 @@ Description:
                     sponsor = brand.capitalize()
                     break
 
-    sponsor_cache[context] = sponsor
+    sponsor_cache[first_line] = sponsor
     return sponsor
 
 def get_recent_videos(channel_id, metadata, max_results=50):
