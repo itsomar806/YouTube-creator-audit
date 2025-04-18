@@ -3,10 +3,6 @@ import re
 import requests
 import pandas as pd
 import openai
-from dotenv import load_dotenv
-
-load_dotenv()  # Load .env values into environment
-
 
 # Set your API keys from environment variables
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
@@ -50,16 +46,50 @@ def get_channel_metadata(channel_id):
         'viewCount': stats.get('viewCount')
     }
 
+def detect_sponsor(description):
+    lines = [line.strip() for line in description.strip().splitlines() if line.strip()]
+    context = "\n".join(lines[:5])
+
+    if context in sponsor_cache:
+        return sponsor_cache[context]
+
+    try:
+        prompt = f"""You are an expert at detecting sponsorships in YouTube video descriptions.
+Your job is to return the name of a third-party brand or company (external sponsor) being promoted.
+Ignore any self-promotion (like creator's website, course, or mentorship links).
+
+Only return the brand name. If none, return 'None'.
+
+Description:
+{context}"""
+
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "Extract only third-party sponsor names from the given YouTube description."},
+                {"role": "user", "content": prompt.strip()}
+            ],
+            max_tokens=20,
+            temperature=0
+        )
+        answer = response.choices[0].message.content.strip()
+        sponsor_cache[context] = answer if answer.lower() != 'none' else ''
+        return sponsor_cache[context]
+    except Exception:
+        sponsor_cache[context] = ''
+        return ''
+
 def get_recent_videos(channel_id, metadata, max_results=50):
     uploads_response = call_youtube_api("channels", {"id": channel_id, "part": "contentDetails"})
     playlist_id = uploads_response['items'][0]['contentDetails']['relatedPlaylists']['uploads']
     playlist_items = call_youtube_api("playlistItems", {"part": "snippet", "playlistId": playlist_id, "maxResults": max_results})
     video_ids = [item['snippet']['resourceId']['videoId'] for item in playlist_items['items']]
     videos = call_youtube_api("videos", {"part": "snippet,statistics", "id": ','.join(video_ids)})
+
     result = []
     for item in videos['items']:
         desc = item['snippet']['description']
-        sponsor = detect_sponsor("\n".join(desc.splitlines()[:5]))
+        sponsor = detect_sponsor(desc)
         result.append({
             'videoId': item['id'],
             'title': item['snippet']['title'],
@@ -72,46 +102,6 @@ def get_recent_videos(channel_id, metadata, max_results=50):
             'sponsor': sponsor if sponsor.lower() not in ["youtube", "instagram"] else ''
         })
     return result
-
-def detect_sponsor(description):
-    if description in sponsor_cache:
-        return sponsor_cache[description]
-    try:
-        # Clean & isolate first 5 non-empty lines
-        first_lines = "\n".join([line.strip() for line in description.splitlines() if line.strip()][:5])
-
-        # Optimized prompt for OpenAI
-        prompt = f"""
-You are a sponsorship detection agent.
-Your task is to extract the name of a company *not owned by the creator* (external sponsor) being promoted in a YouTube description.
-Ignore: the creator’s own products (mentorships, newsletters, courses, etc.), and platforms like YouTube or Instagram.
-Only return the sponsor brand name (e.g., 'HubSpot', 'NordVPN', 'Squarespace', etc). Respond only with the brand name or 'None'.
-
-Text:
-{first_lines}
-"""
-
-        response = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": "You extract sponsor brand names from YouTube descriptions."},
-                {"role": "user", "content": prompt.strip()}
-            ],
-            max_tokens=20,
-            temperature=0
-        )
-        answer = response.choices[0].message.content.strip()
-
-        # Filter common false positives
-        if answer.lower() in ["none", "youtube", "instagram", "tiktok"]:
-            sponsor_cache[description] = ''
-        else:
-            sponsor_cache[description] = answer
-        return sponsor_cache[description]
-
-    except Exception:
-        sponsor_cache[description] = ''
-        return ''
 
 def export_to_excel(video_data, metadata):
     df = pd.DataFrame(video_data)
@@ -131,3 +121,4 @@ def highlight_top_sponsored_topics(video_data):
         'title': 'count'
     }).rename(columns={'title': 'video_count'}).sort_values(by='views', ascending=False)
     return grouped.reset_index().to_markdown(index=False)
+
