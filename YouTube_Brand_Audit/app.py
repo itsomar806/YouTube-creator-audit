@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-
 from dashboard_utils import (
     extract_channel_id_from_url,
     get_channel_metadata,
@@ -9,44 +8,38 @@ from dashboard_utils import (
     highlight_top_sponsored_topics
 )
 
-st.set_page_config(page_title="YouTube Brand Audit Tool", layout="wide")
-st.title("📊 YouTube Brand Audit Tool")
+st.set_page_config(page_title="YouTube Sponsor Audit Dashboard", layout="wide")
+st.title("📊 YouTube Brand Sponsorship Audit")
 
-url = st.text_input("Paste a YouTube channel URL:")
+with st.sidebar:
+    st.header("Audit Settings")
+    url_input = st.text_input("Paste a YouTube Channel URL:")
+    limit = st.slider("Max Videos to Analyze", 10, 100, 50)
 
-if st.button("Run Audit") and url:
+if url_input:
     try:
-        channel_id = extract_channel_id_from_url(url)
-        st.info(f"🔍 Channel ID: {channel_id}")
+        channel_id = extract_channel_id_from_url(url_input)
+        with st.spinner("Fetching channel data..."):
+            metadata = get_channel_metadata(channel_id)
+            video_data = get_recent_videos(channel_id, metadata, max_results=limit)
 
-        metadata = get_channel_metadata(channel_id)
-        if metadata is None:
-            st.error("❌ Could not fetch channel metadata. Please check the URL or try again.")
-            st.stop()
+        st.success(f"Found {len(video_data)} videos for {metadata['title']}")
 
-        st.success(f"✅ Found: {metadata['title']}")
+        df = pd.DataFrame(video_data)
 
-        videos = get_recent_videos(channel_id, metadata)
-        df = pd.DataFrame(videos)
+        st.subheader("📈 Channel Overview")
+        st.markdown(f"**Channel Name:** {metadata['title']}")
+        st.markdown(f"**Subscribers:** {metadata['subscriberCount']}")
+        st.markdown(f"**Videos:** {metadata['videoCount']}")
+        st.markdown(f"**Views:** {metadata['viewCount']}")
 
-        if df.empty:
-            st.warning("No videos found on this channel.")
-            st.stop()
+        st.subheader("🎬 Recent Videos")
+        st.dataframe(df[['title', 'views', 'likes', 'comments', 'sponsor', 'video_url']])
 
-        # Show raw video descriptions first
-        st.subheader("📄 Video Descriptions")
-        for video in videos:
-            st.markdown(f"**{video['title']}**\n\n{video['description']}")
+        st.download_button("📥 Download Excel Report", data=export_to_excel(video_data, metadata), file_name="audit_report.xlsx")
 
-        # Detect sponsors using OpenAI
-        st.subheader("🤖 Detected Sponsors")
-        for video in videos:
-            desc_head = "\n".join(video['description'].strip().splitlines()[:5])
-            sponsor = detect_sponsor(desc_head)
-            if sponsor and sponsor.lower() in ["youtube", "instagram"]:
-                sponsor = ""
-            st.markdown(f"🧠 **Detected Sponsor:** `{sponsor}`\n\n📰 **Video:** {video['title']}")
+        st.subheader("🏆 Top Performing Sponsored Topics")
+        st.markdown(highlight_top_sponsored_topics(video_data))
 
     except Exception as e:
-        st.error(f"❌ {e}")
-
+        st.error(f"❌ Error: {e}")
