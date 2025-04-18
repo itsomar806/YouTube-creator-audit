@@ -70,8 +70,7 @@ def detect_sponsor(description):
 
     # --- Layer 1: GPT-4 (function call) ---
     try:
-        system_msg = """You are an expert sponsorship detector. Extract only third-party brand names being clearly promoted. 
-Avoid personal websites, social handles, courses, etc. Only output ONE sponsor brand. Return 'None' if no sponsor."""
+        system_msg = """analyze the video descriptions from the videos and pull possible sponsors based on sponsorships links found in their description """
 
         response = openai.ChatCompletion.create(
             model="gpt-4",
