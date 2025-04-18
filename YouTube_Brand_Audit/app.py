@@ -41,8 +41,13 @@ if st.button("Run Audit") and url:
         # Detect sponsors using OpenAI
         st.subheader("🤖 Detected Sponsors")
         for video in videos:
-            sponsor = detect_sponsor(video['description'])
+            desc_head = '
+'.join(video['description'].strip().splitlines()[:5]))
+            sponsor = detect_sponsor(desc_head)
+            if sponsor and sponsor.lower() in ["youtube", "instagram"]:
+                sponsor = ""
             st.markdown(f"🧠 **Detected Sponsor:** `{sponsor}`\n\n📰 **Video:** {video['title']}")
 
     except Exception as e:
         st.error(f"❌ {e}")
+
